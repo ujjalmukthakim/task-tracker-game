@@ -36,7 +36,17 @@ class Completion(models.Model):
         constraints = [models.UniqueConstraint(fields=["task", "date"], name="unique_task_day")]
 
 
+class SubTask(models.Model):
+    task = models.ForeignKey(Task, on_delete=models.CASCADE, related_name="subtasks")
+    title = models.CharField(max_length=180)
+    completed = models.BooleanField(default=False)
+    points_awarded = models.IntegerField(default=0)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+
 class StudySession(models.Model):
+    task = models.ForeignKey(Task, null=True, blank=True, on_delete=models.SET_NULL, related_name="study_sessions")
     started_at = models.DateTimeField()
     ended_at = models.DateTimeField(null=True, blank=True)
     duration_seconds = models.PositiveIntegerField(default=0)
@@ -67,4 +77,76 @@ class InventoryItem(models.Model):
     icon = models.CharField(max_length=12)
     description = models.CharField(max_length=160)
     cost = models.PositiveIntegerField()
+    quantity = models.PositiveIntegerField(default=1)
+    effect = models.CharField(max_length=40, blank=True)
+    duration_minutes = models.PositiveIntegerField(default=0)
+    active_until = models.DateTimeField(null=True, blank=True)
     purchased_at = models.DateTimeField(auto_now_add=True)
+
+
+class ActivityLog(models.Model):
+    """A small, player-facing ledger: every XP gain or loss has a reason."""
+    created_at = models.DateTimeField(auto_now_add=True)
+    amount = models.IntegerField()
+    reason = models.CharField(max_length=220)
+    kind = models.CharField(max_length=20, default="xp")
+
+
+class RecallTopic(models.Model):
+    """A note to revisit using a simple, confidence-based review schedule."""
+    title = models.CharField(max_length=280)
+    category = models.CharField(max_length=80, blank=True)
+    learned_on = models.DateField()
+    next_review_on = models.DateField()
+    last_score = models.PositiveIntegerField(null=True, blank=True)
+    review_count = models.PositiveIntegerField(default=0)
+    active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+
+class RecallReview(models.Model):
+    topic = models.ForeignKey(RecallTopic, on_delete=models.CASCADE, related_name="reviews")
+    reviewed_on = models.DateField()
+    score = models.PositiveIntegerField()
+    next_review_on = models.DateField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+
+class DailyStudyPlan(models.Model):
+    """A lightweight daily intention, separate from individual quests."""
+    date = models.DateField(unique=True)
+    intention = models.CharField(max_length=220, blank=True)
+    planned_minutes = models.PositiveIntegerField(default=60)
+    energy = models.PositiveIntegerField(default=3)
+    reflection = models.CharField(max_length=420, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+
+class StudySettings(models.Model):
+    exam_name = models.CharField(max_length=100, blank=True)
+    exam_date = models.DateField(null=True, blank=True)
+    weekly_goal_minutes = models.PositiveIntegerField(default=300)
+
+
+class DailyWellbeing(models.Model):
+    date = models.DateField(unique=True)
+    sleep_hours = models.DecimalField(max_digits=3, decimal_places=1, default=7)
+    water_cups = models.PositiveIntegerField(default=0)
+    movement_minutes = models.PositiveIntegerField(default=0)
+    mood = models.PositiveIntegerField(default=3)
+    updated_at = models.DateTimeField(auto_now=True)
+
+
+class StudyResource(models.Model):
+    title = models.CharField(max_length=160)
+    url = models.URLField(blank=True)
+    category = models.CharField(max_length=80, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+
+class WeeklyReflection(models.Model):
+    week_start = models.DateField(unique=True)
+    win = models.CharField(max_length=320, blank=True)
+    blocker = models.CharField(max_length=320, blank=True)
+    next_focus = models.CharField(max_length=320, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
