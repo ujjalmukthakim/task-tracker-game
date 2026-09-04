@@ -5,6 +5,7 @@ class Profile(models.Model):
     name = models.CharField(max_length=60, default="Hero")
     points = models.IntegerField(default=0)
     lifetime_xp = models.IntegerField(default=0)
+    tokens = models.PositiveIntegerField(default=0)
     daily_focus_goal = models.PositiveIntegerField(default=120)
     longest_streak = models.PositiveIntegerField(default=0)
     updated_at = models.DateTimeField(auto_now=True)
@@ -18,11 +19,15 @@ class Task(models.Model):
         LEGENDARY = "legendary", "Legendary · 100 XP"
     title = models.CharField(max_length=180)
     description = models.CharField(max_length=360, blank=True)
+    category = models.CharField(max_length=80, blank=True)
+    importance = models.PositiveSmallIntegerField(default=50)
+    estimated_minutes = models.PositiveIntegerField(default=30)
     priority = models.CharField(max_length=12, choices=Priority.choices, default=Priority.NORMAL)
     is_daily = models.BooleanField(default=False)
     due_date = models.DateField()
     created_at = models.DateTimeField(auto_now_add=True)
     active = models.BooleanField(default=True)
+    token_selected_on = models.DateField(null=True, blank=True)
 
 
 class Completion(models.Model):
@@ -66,6 +71,7 @@ class DailyMission(models.Model):
     easy_target = models.PositiveIntegerField(default=1)
     legendary_target = models.PositiveIntegerField(default=0)
     reward_xp = models.PositiveIntegerField(default=80)
+    reward_tokens = models.PositiveIntegerField(default=1)
     penalty_xp = models.PositiveIntegerField(default=50)
     completed = models.BooleanField(default=False)
     punished = models.BooleanField(default=False)

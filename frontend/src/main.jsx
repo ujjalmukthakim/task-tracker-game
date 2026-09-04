@@ -24,6 +24,9 @@ import {
   Heart,
   BookOpen,
   CalendarDays,
+  ScrollText,
+  Coins,
+  SkipForward,
 } from "lucide-react";
 import "./style.css";
 const API = "/api",
@@ -62,6 +65,17 @@ const Shape = ({ data, value, kind }) => {
   return <div className="shape-wrap"><svg className="shape" viewBox="0 0 290 125">{kind === "area" && <polygon className="area-fill" points={area}/>}<polyline points={points} />{kind === "line" && values.map((v,i)=><circle key={i} cx={i*45+8} cy={112-(v/max)*92} r="6" onMouseEnter={()=>setHovered(i)} onMouseLeave={()=>setHovered(null)} />)}</svg>{hovered !== null && <span className="line-tooltip">{data[hovered].date}: {data[hovered][value]} {value}</span>}</div>;
 };
 const FiveCharts=({title,data,value,color})=><section className="data-set"><div className="set-heading"><p className="eyebrow">{title}</p><h2>Five views · same data</h2></div><div className="five-charts"><article className="panel graph-card"><h3>Bar chart</h3><Bar data={data} value={value} color={color}/></article><article className="panel graph-card"><h3>Line chart</h3><Shape data={data} value={value} kind="line"/></article><article className="panel graph-card"><h3>Area chart</h3><Shape data={data} value={value} kind="area"/></article><article className="panel graph-card"><h3>Focus radar</h3><Shape data={data} value={value} kind="radar"/></article><article className="panel graph-card"><h3>Weekly total</h3><Shape data={data} value={value} kind="donut"/></article></div></section>;
+const CompletionOverview = ({ data }) => {
+  const activeDays = data.filter((day) => day.total > 0);
+  const average = activeDays.length ? Math.round(activeDays.reduce((sum, day) => sum + day.percent, 0) / activeDays.length) : 0;
+  const best = activeDays.reduce((winner, day) => !winner || day.percent > winner.percent ? day : winner, null);
+  const completed = data.reduce((sum, day) => sum + day.done, 0);
+  return <section className="completion-overview panel">
+    <div className="completion-heading"><div><p className="eyebrow">FIRST LOOK · TASK COMPLETION</p><h2>Your 7-day completion pulse</h2><span>Every bar and point is the share of scheduled quests you completed that day.</span></div><div className="completion-stats"><span><small>AVERAGE</small><b>{average}%</b></span><span><small>BEST DAY</small><b>{best ? `${best.date} · ${best.percent}%` : "—"}</b></span><span><small>QUESTS DONE</small><b>{completed}</b></span></div></div>
+    <div className="completion-chart-grid"><article className="completion-chart"><div className="chart-name"><b>Daily completion</b><small>Bar view</small></div><Bar data={data} value="percent" color="gold" /></article><article className="completion-chart"><div className="chart-name"><b>Completion trend</b><small>Line view</small></div><Shape data={data} value="percent" kind="line" /></article></div>
+    <div className="completion-labels">{data.map(day=><span key={day.date}><b>{day.percent}%</b><small>{day.date} · {day.done}/{day.total} quests</small></span>)}</div>
+  </section>;
+};
 function App() {
   const [d, setD] = useState(),
     [tab, setTab] = useState("Today"),
@@ -79,10 +93,14 @@ function App() {
     [recallForm, setRecallForm] = useState({ title: "", category: "" }),
     [plan, setPlan] = useState(null),
     [tools, setTools] = useState(null),
+    [missions, setMissions] = useState(null),
     [resourceForm, setResourceForm] = useState({ title:"", url:"", category:"" }),
     [form, setForm] = useState({
       title: "",
       description: "",
+      category: "",
+      importance: 50,
+      estimatedMinutes: 30,
       priority: "normal",
       daily: false,
       dueDate: new Date().toISOString().slice(0, 10),
@@ -114,6 +132,7 @@ function App() {
   useEffect(() => { if (tab === "Recall") loadRecall(); }, [tab]);
   useEffect(() => { if (tab === "Study Plan") { loadPlan(); loadRecall(); } }, [tab]);
   useEffect(() => { if (tab === "Growth") loadTools(); }, [tab]);
+  useEffect(() => { if (tab === "Missions") fetch(API + "/missions/").then(x=>x.json()).then(setMissions); }, [tab]);
   const post = (url, payload = {}) =>
     fetch(API + url, {
       method: "POST",
@@ -132,13 +151,13 @@ function App() {
     load();
   };
   const openEdit = (t) => {
-    setForm({ title:t.title, description:t.description, priority:t.priority, daily:t.daily, dueDate:t.dueDate });
+    setForm({ title:t.title, description:t.description, category:t.category || "", importance:t.importance ?? 50, estimatedMinutes:t.estimatedMinutes ?? 30, priority:t.priority, daily:t.daily, dueDate:t.dueDate });
     setEditing(t); setModal(true);
   };
   const edit = async (e) => {
     e.preventDefault();
     await fetch(API + `/tasks/${editing.id}/`, { method:"PATCH", headers:{"Content-Type":"application/json"}, body:JSON.stringify(form) });
-    setEditing(null); setForm({ ...form, title:"", description:"" }); load();
+    setEditing(null); setModal(false); setForm({ ...form, title:"", description:"" }); load();
   };
   const add = async (e) => {
     e.preventDefault();
@@ -147,8 +166,8 @@ function App() {
     setForm({ ...form, title: "", description: "" });
     load();
   };
-  const timer = async () => {
-    await post("/timer/", { action: d.timer.running ? "stop" : "start", taskId: timerTask });
+  const timer = async (taskId = timerTask) => {
+    await post("/timer/", { action: d.timer.running ? "stop" : "start", taskId });
     setElapsed(0);
     load();
   };
@@ -208,8 +227,16 @@ function App() {
   const saveTool = async (section, payload) => { await fetch(API+"/study-tools/", {method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({section,...payload})}); loadTools(); };
   const addResource = async (e) => { e.preventDefault(); if (!resourceForm.title.trim()) return; await post("/study-tools/",resourceForm); setResourceForm({title:"",url:"",category:""}); loadTools(); };
   const removeResource = async (id) => { await fetch(API+`/resources/${id}/`,{method:"DELETE"}); loadTools(); };
+  const useToken = async (task, action) => {
+    const r = await post(`/tasks/${task.id}/token/`, { action });
+    const result = await r.json();
+    if (!r.ok) return alert(result.error);
+    if (action === "choose") { setTimerTask(String(task.id)); await timer(task.id); }
+    load();
+    if (tab === "Missions") fetch(API + "/missions/").then(x=>x.json()).then(setMissions);
+  };
   if (!d) return <div className="loading">Loading your command center…</div>;
-  let { profile, tasks = [], summary, week = [], timeWeek = [], priority, breakdown, study, badges = [], mission } =
+  let { profile, tasks = [], summary, week = [], timeWeek = [], completionWeek = [], priority, breakdown, study, badges = [], mission } =
       d,
     fmt = (s) =>
       `${String(Math.floor(s / 3600)).padStart(2, "0")}:${String(Math.floor(s / 60) % 60).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
@@ -230,6 +257,7 @@ function App() {
         <nav>
           {[
             ["Today", Target],
+            ["Missions", ScrollText],
             ["Study Plan", ClipboardList],
             ["Growth", Heart],
             ["Progress", Trophy],
@@ -275,14 +303,15 @@ function App() {
         {tab === "Today" && (
           <>
             <div className="stat-grid">
-              <article className="level-card">
+              <article className="level-card" style={{"--level-color":profile.levelIdentity?.color,"--level-soft":profile.levelIdentity?.softColor}}>
                 <div className="level-ring">
+                  <span>{profile.levelIdentity?.icon || "✦"}</span>
                   <b>{profile.level}</b>
                   <small>LEVEL</small>
                 </div>
                 <div>
                   <p>
-                    Current XP <b>{profile.currentXp} / {profile.nextXp}</b>
+                    <strong>{profile.levelIdentity?.title || profile.rank}</strong> · Current XP <b>{profile.currentXp} / {profile.nextXp}</b>
                   </p>
                   <div className="progress">
                     <i
@@ -347,6 +376,7 @@ function App() {
                 )}
               </button>
             </div>
+            {d.recommendation && <article className="next-task panel"><div><p className="eyebrow">YOUR NEXT TASK</p><h2>{d.recommendation.title}</h2><span>{d.recommendation.reason} · about {d.recommendation.remainingMinutes} min remaining</span></div><button className="create" onClick={()=>{setTimerTask(String(d.recommendation.id)); timer(d.recommendation.id);}}><Play /> Start this task</button></article>}
             {d.boost.active && <div className="boost-live"><Zap /> A boost is active until {new Date(d.boost.until).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"})} — XP rewards are doubled.</div>}
             <div className="focus-tools">
               <article><p className="eyebrow">TODAY'S FOCUS QUEST</p><b>{study.todayMinutes} / {profile.dailyGoal} minutes</b><i><span style={{width: `${Math.min(100, study.todayMinutes / profile.dailyGoal * 100)}%`}} /></i><small>Set your own pace; every focused block adds XP.</small></article>
@@ -355,7 +385,7 @@ function App() {
             <article className={"daily-mission " + (mission.completed ? "mission-complete" : "")}>
               <div className="mission-medal">⚔️</div>
               <div className="mission-copy"><p className="eyebrow">LEVEL-SCALED DAILY MISSION</p><h2>{mission.completed ? "Mission complete — reward claimed!" : mission.title}</h2><p>{mission.flavor} Study <b>{study.todayMinutes}/{mission.studyMinutes} min</b> · Complete <b>{mission.easyDone}/{mission.easyTarget} easy</b> · Complete <b>{mission.legendaryDone}/{mission.legendaryTarget} legendary</b></p><div className="mission-progress"><i><span style={{width:`${Math.min(100,(study.todayMinutes/mission.studyMinutes*34)+(mission.easyDone/Math.max(1,mission.easyTarget)*33)+(mission.legendaryDone/Math.max(1,mission.legendaryTarget)*33))}%`}}/></i></div></div>
-              <div className="mission-reward"><b>{mission.completed ? "✓" : `+${mission.reward}`}</b><small>{mission.completed ? "COMPLETED" : "MISSION XP"}</small><em>Miss it: −{mission.penalty} XP</em></div>
+              <div className="mission-reward"><b>{mission.completed ? "✓" : `+${mission.reward}`}</b><small>{mission.completed ? "COMPLETED" : "MISSION XP"}</small><strong>+{mission.tokens} token</strong><em>Miss it: −{mission.penalty} XP</em></div>
             </article>
             <section className="upcoming-missions"><div className="section-title"><p className="eyebrow">MISSION RADAR</p><h2>Coming up this week</h2><span>Preview the next 7 missions from the 100-mission rotation.</span></div><div className="mission-preview-grid">{(d.upcomingMissions || []).map(m=><article key={m.date}><b>{m.day} · {m.title}</b><p>{m.flavor}</p><small>{m.studyMinutes} min · {m.easyTarget} easy · {m.legendaryTarget} legendary</small><em>+{m.reward} XP · miss −{m.penalty}</em></article>)}</div></section>
             <div className="board">
@@ -392,12 +422,15 @@ function App() {
                           >
                             {pri[t.priority][0]}
                           </span>
+                          <span className="importance">{t.importance}/100 important</span>
+                          {t.category && <span className="repeat">{t.category}</span>}
                           {t.daily && <span className="repeat">↻ Daily</span>}
                         </div>
                         <div className="xp">
                           +{t.xp}
                           <small>XP</small>
                         </div>
+                        {t.skipped && <span className="skipped-tag">Ignored</span>}
                         <button className="delete" onClick={() => del(t.id)}>
                           <Trash2 />
                         </button>
@@ -455,13 +488,22 @@ function App() {
               <h2>Progress analytics</h2>
               <span>Ten charts: five for weekly XP, five for study time.</span>
             </div>
+            <CompletionOverview data={completionWeek} />
             <FiveCharts title="WEEKLY XP PERFORMANCE" data={week} value="xp" color="purple" />
             <FiveCharts title="DAILY STUDY HOURS" data={timeWeek} value="minutes" color="mint" />
             <section className="task-insights">
-              <div className="section-title"><p className="eyebrow">TASK COACH</p><h2>{d.recommendation ? `Focus on ${d.recommendation.title}` : "Create a quest to get coaching"}</h2><span>{d.recommendation ? `${d.recommendation.misses} missed deadline(s) and ${d.recommendation.done} completion(s): this task needs attention.` : ""}</span></div>
+              <div className="section-title"><p className="eyebrow">TASK COACH</p><h2>{d.recommendation ? `Focus on ${d.recommendation.title}` : "Create a quest to get coaching"}</h2><span>{d.recommendation ? d.recommendation.reason : ""}</span></div>
               <div className="task-graph-grid">{(d.taskStats || []).map(t=><article className="panel" key={t.id}><b>{t.title}</b><small>{t.done} done · {t.misses} missed · {t.minutes} min ({t.timePercent}% of total)</small><Shape data={t.history} value="xp" kind="line" /><span className="line-caption">7-day XP trend</span><Shape data={t.timeHistory} value="minutes" kind="line" /><span className="line-caption">7-day study-time trend</span></article>)}</div>
             </section>
-            <section className="activity panel"><p className="eyebrow">XP LEDGER</p><h2>Every change explained</h2>{(d.activity || []).length ? d.activity.map((a,i)=><div key={i} className={a.amount<0?"loss":"gain"}><b>{a.amount>0?"+": ""}{a.amount} XP</b><span>{a.reason}<small>{a.at}</small></span></div>):<p>No XP events yet.</p>}</section>
+            <section className="activity panel"><p className="eyebrow">REWARD LEDGER</p><h2>Every change explained</h2>{(d.activity || []).length ? d.activity.map((a,i)=><div key={i} className={a.amount<0?"loss":"gain"}><b>{a.amount>0?"+": ""}{a.amount} {a.kind === "token" ? "token" : "XP"}</b><span>{a.reason}<small>{a.at}</small></span></div>):<p>No reward events yet.</p>}</section>
+          </section>
+        )}
+        {tab === "Missions" && (
+          <section className="missions-page">
+            <div className="section-title"><p className="eyebrow">MISSION BOARD</p><h2>One hundred missions await</h2><span>Complete each daily mission for XP and tokens. Tokens give you one tactical choice.</span></div>
+            <div className="token-summary panel"><Coins /><div><small>MISSION TOKENS</small><b>{profile.tokens}</b><span>Earned from completed missions</span></div><p>Spend 1 token to choose the quest you want to focus on now, or to ignore one quest scheduled today. Ignoring a quest costs half its XP reward.</p></div>
+            <section className="token-powers"><article className="panel"><p className="eyebrow">CHOOSE YOUR NEXT QUEST · 1 TOKEN</p><h2>Set your own focus</h2><span>Choose a quest and immediately begin a focus session.</span><div className="token-task-list">{tasks.filter(t=>!t.completed&&!t.skipped).map(t=><button key={t.id} disabled={!profile.tokens || d.timer.running} onClick={()=>useToken(t,"choose")}><b>{t.title}</b><small>{t.tokenSelected ? "Chosen now" : "Choose & start"}</small></button>)}{!tasks.filter(t=>!t.completed&&!t.skipped).length&&<p className="empty">No unfinished quests for today.</p>}</div></article><article className="panel"><p className="eyebrow">IGNORE ONE QUEST · 1 TOKEN</p><h2>Protect your day</h2><span>Skip a scheduled quest today for a half-XP penalty. It cannot be completed later today.</span><div className="token-task-list">{tasks.filter(t=>!t.completed&&!t.skipped).map(t=><button key={t.id} disabled={!profile.tokens} onClick={()=>{if(window.confirm(`Ignore “${t.title}” for today? You will lose ${Math.floor(t.xp/2)} XP.`))useToken(t,"skip")}}><b>{t.title}</b><small><SkipForward /> Ignore · −{Math.floor(t.xp/2)} XP</small></button>)}</div></article></section>
+            <section className="mission-catalog"><div className="section-title"><p className="eyebrow">100-MISSION ROTATION</p><h2>Your mission path</h2><span>Each mission has its own requirements, XP, and token reward.</span></div><div className="mission-catalog-grid">{missions?.missions.map(m=><article className={m.completed?"done":""} key={m.date}><small>MISSION #{m.number} · {new Date(m.date+"T00:00:00").toLocaleDateString(undefined,{month:"short",day:"numeric"})}</small><b>{m.completed?"✓ ":""}{m.title}</b><p>{m.flavor}</p><span>{m.studyMinutes} min · {m.easyTarget} easy · {m.legendaryTarget} legendary</span><footer>+{m.reward} XP · +{m.tokens} <Coins /></footer></article>)}</div></section>
           </section>
         )}
         {tab === "Study Plan" && plan && (
@@ -472,7 +514,7 @@ function App() {
               <article className="plan-tip"><p className="eyebrow">SMART PACING</p><b>{plan.energy <= 2 ? "Low energy: choose one small win, then rest." : plan.energy === 3 ? "Steady energy: use one focused block before switching tasks." : "High energy: begin with the hardest thing while momentum is strong."}</b><small>Recall topics due today: {plan.dueRecall}. Use the Recall tab after your focus block.</small></article>
             </div>
             <form className="plan-form panel" onSubmit={savePlan}><p className="eyebrow">CHECK IN</p><h2>Design today</h2><label>Most important outcome<input value={plan.intention} onChange={e=>setPlan({...plan,intention:e.target.value})} placeholder="e.g. Understand chapter 4 and solve 10 problems" /></label><div className="plan-fields"><label>Planned focus minutes<input type="number" min="15" max="600" value={plan.plannedMinutes} onChange={e=>setPlan({...plan,plannedMinutes:e.target.value})} /></label><label>Energy right now<div className="energy-picks">{[1,2,3,4,5].map(n=><button type="button" className={plan.energy===n?"picked":""} onClick={()=>setPlan({...plan,energy:n})} key={n}>{n}</button>)}</div></label></div><label>End-of-day reflection <textarea value={plan.reflection} onChange={e=>setPlan({...plan,reflection:e.target.value})} placeholder="What worked, what was difficult, and what will you change tomorrow?" /></label><button className="create">Save study plan <Sparkles /></button></form>
-            <section className="plan-queue panel"><p className="eyebrow">SUGGESTED ORDER</p><h2>Start with the next useful action</h2><ol>{plan.dueRecall > 0 && <li>Review {plan.dueRecall} memory topic{plan.dueRecall===1?"":"s"} due today.</li>}{tasks.filter(t=>!t.completed).slice(0,3).map(t=><li key={t.id}>Work on: <b>{t.title}</b></li>)}{!plan.dueRecall && !tasks.filter(t=>!t.completed).length && <li>Add one quest or a recall topic to begin.</li>}</ol></section>
+            <section className="plan-queue panel"><p className="eyebrow">SUGGESTED ORDER</p><h2>Start with the next useful action</h2><ol>{plan.dueRecall > 0 && <li>Review {plan.dueRecall} memory topic{plan.dueRecall===1?"":"s"} due today.</li>}{(d.recommendedTasks || []).slice(0,3).map(t=><li key={t.id}>Work on: <b>{t.title}</b> <small>({t.reason})</small></li>)}{!plan.dueRecall && !(d.recommendedTasks || []).length && <li>Add one quest or a recall topic to begin.</li>}</ol></section>
           </section>
         )}
         {tab === "Growth" && tools && (
@@ -560,6 +602,7 @@ function App() {
                   setForm({ ...form, description: e.target.value })
                 }
               />
+              <div className="planning-fields"><label>Category (optional)<input value={form.category} placeholder="e.g. Maths" onChange={e=>setForm({...form,category:e.target.value})} /></label><label>Importance: <b>{form.importance}/100</b><input type="range" min="0" max="100" value={form.importance} onChange={e=>setForm({...form,importance:Number(e.target.value)})} /></label><label>Estimated minutes<input type="number" min="5" max="1440" value={form.estimatedMinutes} onChange={e=>setForm({...form,estimatedMinutes:Number(e.target.value)})} /></label></div>
               <label>Challenge level</label>
               <div className="priorities">
                 {Object.entries(pri).map(([k, v]) => (
